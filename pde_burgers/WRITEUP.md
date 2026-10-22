@@ -21,11 +21,16 @@
   the worst.
 * Refinement depends on difficulty. On the strongest shocks, steps 1→3 cut the error by 12%. On smooth cases
   step 1 is best, and the later steps add error. That is where the step-4 overshoot comes from.
+* **Adaptive halting at inference time, with no retraining, helps.** The rule picks each input's number of steps
+  from the sharpness of the step-1 prediction and is fitted on validation. It reaches **0.0126 ± 0.0007**: 7%
+  better than the fixed 4 steps, with **42% fewer FLOPs**, and better than every fixed step in both seeds. It ties
+  the 24-layer model at 58% of its FLOPs, but still trails the 4×-shallow model (0.0112).
 
 **Overall, recursion does not improve the primary metric.** Its advantage over the same-size network is explained
 by longer training, and it only ties untied depth. **But it is the most accurate model on the hardest,
-shock-dominated quarter of the data, and its refinement steps help exactly there.** That points to
-*adaptive* recursion, i.e. TRM-style halting that refines only the hard cases, as the version worth testing next.
+shock-dominated quarter of the data, and its refinement steps help exactly there.** A simple adaptive-halting
+rule already turns this into a better accuracy–compute trade-off. A per-trajectory oracle reaches 0.0114, about
+the 4×-shallow model's level, so *learned* halting is the version worth testing next.
 All Transformers are about 25× better than the best linear map, so the task is learnt and needs nonlinearity.
 
 ---
@@ -279,6 +284,39 @@ Error bars are the std over 2 seeds.*
 | 3 | 0.0123 | 0.0121 | **0.0120** | **0.0147** |
 | 4 (reported) | 0.0138 | 0.0128 | 0.0125 | 0.0149 |
 
+### 3.6 Adaptive halting at inference time
+
+Section 3.5 shows that smooth inputs are best served by one refinement step and shocked inputs by three.
+`adaptive_halting.py` tests whether that can be exploited **without retraining**, using the same recursive
+checkpoints. Each test input gets a difficulty score available at inference time:
+
+* **Step-1 prediction:** max |∂û/∂x| of the model's own step-1 output. This is free, since step 1 runs anyway.
+* **Input:** max |∂u/∂x| of u(x,0).
+
+The rule is fitted on the **validation set only**: split it into 4 equal-count bins by score and, per bin, pick
+the step with the lowest validation error. The bin edges and step choices are then applied once to the test set.
+
+![Adaptive halting: error vs mean compute](figures/adaptive_halting.png)
+
+*Test relative L² against mean FLOPs per sample. Orange: the recursive model with a fixed number of steps.
+Dark markers: the two adaptive rules. Grey star: a per-trajectory oracle that picks the best step using the
+test target (an upper bound, not achievable). Horizontal lines: the other models' final outputs. Error bars:
+std over 2 seeds.*
+
+| Recursive model output | Test rel L² | Test RMSE | Mean steps | Mean MFLOPs/sample |
+|---|---:|---:|---:|---:|
+| Fixed step 3 (best fixed; validation also picks it) | 0.0127 ± 0.0007 | 0.0073 ± 0.0003 | 3.00 | 1,057 |
+| Fixed step 4 (reported in §3.1) | 0.0135 ± 0.0006 | 0.0073 ± 0.0003 | 4.00 | 1,410 |
+| **Adaptive, score from the step-1 prediction** | **0.0126 ± 0.0007** | 0.0073 ± 0.0003 | 2.31 ± 0.21 | **815 ± 74** |
+| Adaptive, score from the input | 0.0127 ± 0.0006 | 0.0074 ± 0.0004 | 2.58 ± 0.18 | 911 ± 64 |
+| Oracle per trajectory (upper bound) | 0.0114 ± 0.0007 | 0.0067 ± 0.0003 | 2.18 ± 0.08 | 769 ± 29 |
+| *For reference: deep / 4×-shallow* | *0.0131 / 0.0112* | | | *1,410 / 118* |
+
+**Per seed (step-1-prediction rule):** 0.0131 and 0.0121, against 0.0140 and 0.0131 for the fixed 4 steps
+and 0.0132 and 0.0123 for fixed step 3. It beats every fixed step in both seeds. With the step-1-prediction
+score, the fitted rules choose **step 1 for the smoothest quarter** and steps 2–3 for the rest. Neither rule ever
+chooses step 4.
+
 ---
 
 ## 4. What the results say
@@ -324,7 +362,15 @@ Error bars are the std over 2 seeds.*
    Picking the best step for each quartile would give about 0.0126 overall instead of 0.0135. But that
    uses the true solution's shock strength and the test set, so it is an **illustration of what learned
    halting could gain, not a result**. It would still trail the 4×-shallow model (0.0112). The protocol fixed
-   step 4 as the reported output before training.
+   step 4 as the reported output before training. Section 3.6 tests a version of this that is legitimate at
+   inference time.
+
+6. **Adaptive halting at inference time turns the step pattern into a better trade-off, with no retraining.**
+   Choosing the number of steps from the sharpness of the step-1 prediction, fitted on validation, gives 0.0126.
+   That is better than every fixed step in both seeds, 7% better than the reported 4 steps, and uses 42% fewer
+   FLOPs (§3.6). It **ties the 24-layer model at 58% of its compute with 11× fewer parameters.** It does not beat
+   the 4×-shallow model (0.0112). The gap to the per-trajectory oracle (0.0114) is large: the simple rule recovers
+   only about 40% of the possible gain over the fixed 4 steps. A better halting signal is the clearest lever left.
 
 ### Verdict
 
@@ -336,8 +382,10 @@ small non-recursive Transformer trained longer was the best option here, and 12�
 **The shock-strength analysis changes the picture.** Recursion is the most accurate model on the hardest
 quarter of the data, the trajectories with the strongest shocks, and its refinement steps help exactly there
 while hurting on smooth cases. A fixed number of refinement steps averages these two effects away. That makes
-**adaptive recursion** (TRM's learned halting: stop early on easy inputs, refine hard ones) the hypothesis worth
-testing next, not "recursion in general".
+**adaptive recursion** the version worth pursuing, not "recursion in general". A rule fitted on validation,
+with no retraining, already gives the recursive model its best result: 0.0126, tying the 24-layer model at 58% of
+its compute. The per-trajectory oracle (0.0114) shows that learned halting could plausibly match the best
+model here while spending most of its compute on the hard cases.
 
 ---
 
@@ -368,10 +416,10 @@ testing next, not "recursion in general".
 
 ## 6. Next steps
 
-1. **Adaptive halting.** Let the recursive model choose its number of steps per input, using TRM's learned
-   halting head or a difficulty estimate computed from u(x,0) or from the step-1 prediction. §3.5 suggests
-   stopping at step 1 on smooth inputs and refining shocked ones. Compare against the 4×-shallow model at equal
-   training updates.
+1. **Learned halting.** Section 3.6's rule-based halting recovers about 40% of the oracle's gain. Train TRM's
+   halting head, which predicts whether the current answer is good enough, so halting is learned instead of
+   binned. Compare against the 4×-shallow model at equal training updates. Training with halting may also stop
+   later steps from overshooting smooth inputs.
 2. Train all models to convergence (or for equal wall-clock time) and re-rank them, with 3+ seeds.
 3. Run FNO and U-Net under exactly this protocol.
 4. Test whether the step-4 overshoot is fixable: weight later steps' losses more heavily, use a lower learning
