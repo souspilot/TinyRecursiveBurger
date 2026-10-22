@@ -1,0 +1,135 @@
+{
+ "data": {
+  "target_time_actual": 1.0,
+  "target_index": 100,
+  "input_time_actual": 0.0,
+  "time_convention": "leading",
+  "split_sizes": {
+   "train": 8000,
+   "val": 1000,
+   "test": 1000
+  },
+  "norm_mean": -0.012345982907619487,
+  "norm_std": 0.7150788543013362
+ },
+ "device": "NVIDIA A100-SXM4-80GB",
+ "bf16": true,
+ "rows": [
+  {
+   "model": "persistence",
+   "run": "-",
+   "seed": null,
+   "params": 0,
+   "test": {
+    "rel_l2_mean": 1.7668565392516158,
+    "rel_l2_median": 1.0878431395780122,
+    "rel_l2_std": 3.93043985010393,
+    "rmse": 0.5237301231417971
+   },
+   "latency_ms": {},
+   "core_layer_calls": 0,
+   "flops": 0
+  },
+  {
+   "model": "mean",
+   "run": "-",
+   "seed": null,
+   "params": 1024,
+   "val": {
+    "rel_l2_mean": 0.9998729829329641,
+    "rel_l2_median": 1.0068048742358942,
+    "rel_l2_std": 0.05423265185609793,
+    "rmse": 0.611318575669415
+   },
+   "test": {
+    "rel_l2_mean": 1.004703726755841,
+    "rel_l2_median": 0.9926382038972429,
+    "rel_l2_std": 0.12688436052057042,
+    "rmse": 0.602613867700428
+   },
+   "latency_ms": {},
+   "core_layer_calls": 0,
+   "flops": 0
+  },
+  {
+   "model": "ridge",
+   "run": "-",
+   "seed": null,
+   "params": 1049600,
+   "val": {
+    "rel_l2_mean": 0.3592445113422774,
+    "rel_l2_median": 0.26374861750462186,
+    "rel_l2_std": 0.30371279005919155,
+    "rmse": 0.13993487736454627
+   },
+   "alpha": 10000.0,
+   "test": {
+    "rel_l2_mean": 0.34342000460450617,
+    "rel_l2_median": 0.24217257020550864,
+    "rel_l2_std": 0.3023216385854041,
+    "rmse": 0.13353642492880388
+   },
+   "latency_ms": {},
+   "core_layer_calls": 0,
+   "flops": 2099200
+  },
+  {
+   "model": "shallow",
+   "run": "runs_extra/shallow4x_s0",
+   "seed": 0,
+   "params": 415368,
+   "selected_epoch": 3554,
+   "selected_step": 444375,
+   "val": {
+    "rel_l2_mean": 0.010256642350818218,
+    "rel_l2_median": 0.006949431418827847,
+    "rel_l2_std": 0.012020053073734814,
+    "rmse": 0.01601316340968886
+   },
+   "test": {
+    "rel_l2_mean": 0.009964431042428643,
+    "rel_l2_median": 0.00629091389455267,
+    "rel_l2_std": 0.014858893487533012,
+    "rmse": 0.00927716000105577
+   },
+   "train_sec": 3189.841235132888,
+   "optimizer_steps": 500000,
+   "epochs_done": 4000,
+   "core_layer_calls": 2,
+   "latency_ms": {
+    "1": 1.1633709073066711,
+    "1000": 4.882113076746464
+   },
+   "flops": 117964800
+  },
+  {
+   "model": "shallow",
+   "run": "runs_extra/shallow4x_s1",
+   "seed": 1,
+   "params": 415368,
+   "selected_epoch": 3914,
+   "selected_step": 489375,
+   "val": {
+    "rel_l2_mean": 0.01288365475287099,
+    "rel_l2_median": 0.008327947128425522,
+    "rel_l2_std": 0.014375159462778323,
+    "rmse": 0.015663880422045338
+   },
+   "test": {
+    "rel_l2_mean": 0.01237349943712777,
+    "rel_l2_median": 0.007267361172783754,
+    "rel_l2_std": 0.017350437587255744,
+    "rmse": 0.012317467569252638
+   },
+   "train_sec": 3173.8263734281063,
+   "optimizer_steps": 500000,
+   "epochs_done": 4000,
+   "core_layer_calls": 2,
+   "latency_ms": {
+    "1": 1.158776693046093,
+    "1000": 4.363132640719414
+   },
+   "flops": 117964800
+  }
+ ]
+}
