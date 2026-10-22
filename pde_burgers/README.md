@@ -85,6 +85,20 @@ markdown file has, for each bin: mean relative L², RMSE, each bin's share of th
 and the recursive model's error after each refinement step. Only finished runs (with `summary.json`) are used.
 Runs are grouped by directory name without the `_s<seed>` suffix.
 
+## Adaptive halting at inference time (no retraining)
+
+The recursive model refines shocked trajectories well but adds error to smooth ones. `adaptive_halting.py`
+picks the number of refinement steps for each input from a difficulty score available at inference time:
+max |∂û/∂x| of the step-1 prediction, or max |∂u/∂x| of the input. The rule is fitted on validation (best
+step per equal-count score bin) and applied once to test:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python -m pde_burgers.adaptive_halting --runs 'runs/recursive_s*' --refs results_prov/metrics.json results_shallow4x/metrics.json
+```
+
+This writes `results_adaptive/adaptive.md`, `adaptive.json` and `adaptive_halting.png`. Together they compare
+fixed steps 1–4, both adaptive rules and a per-trajectory oracle (upper bound) on error and mean FLOPs.
+
 ## Local smoke test (no GPU, synthetic data)
 
 ```bash
