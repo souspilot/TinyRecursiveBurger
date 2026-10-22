@@ -123,5 +123,17 @@ def core_layer_calls(name, cfg, n_steps=None):
     return cfg["core_layers"] if name == "shallow" else cfg["deep_layers"]
 
 
+def flops_per_sample(name, cfg, n_steps=None):
+    """Forward-pass matmul FLOPs for one field (2 FLOPs per multiply-add; norms/activations ignored).
+
+    Per Transformer layer on N tokens of width d with FFN ratio m:
+      QKV + output projection 4*N*d^2, FFN 2*m*N*d^2, attention scores + weighted sum 2*N^2*d  (MACs).
+    """
+    N, d, m, P = cfg["num_patches"], cfg["d_model"], cfg["ffn_mult"], cfg["patch_size"]
+    layer_macs = (4 + 2 * m) * N * d * d + 2 * N * N * d
+    io_macs = 2 * N * P * d  # patch encoder + decoder
+    return 2 * (core_layer_calls(name, cfg, n_steps) * layer_macs + io_macs)
+
+
 def count_params(model):
     return sum(p.numel() for p in model.parameters())

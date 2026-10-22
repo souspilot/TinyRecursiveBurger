@@ -110,14 +110,17 @@ flowchart LR
     step -. "detach (y, z)" .-> step
 ```
 
-| Model | Core | Params | Layer applications per prediction | Role |
-|---|---|---|---|---|
-| **Recursive (TRM-style)** | 2 layers, reused: n = 2 z-updates + 1 y-update per step, K = 4 steps | 415,624 | 4 × 3 × 2 = **24** | the method being tested |
-| Shallow | 2 layers, applied once | 415,368 | 2 | **same parameter count** as recursive |
-| Deep | 24 untied layers, applied once | 4,777,352 | **24** | **same computation per prediction** as recursive |
-| Ridge regression | linear map u(x,0) → u(x,t\*) with bias, α chosen on validation | 1,049,600 | – | does the task need nonlinearity? |
-| Persistence | û = u(x,0) | 0 | – | does anything change over time? |
-| Training-mean field | û = mean of the training targets | 1,024 | – | is the input used at all? |
+| Model | Core | Params | Layer applications per prediction | MFLOPs per sample | Role |
+|---|---|---|---|---:|---|
+| **Recursive (TRM-style)** | 2 layers, reused: n = 2 z-updates + 1 y-update per step, K = 4 steps | 415,624 | 4 × 3 × 2 = **24** | 1,410 | the method being tested |
+| Shallow | 2 layers, applied once | 415,368 | 2 | 118 | **same parameter count** as recursive |
+| Deep | 24 untied layers, applied once | 4,777,352 | **24** | 1,410 | **same computation per prediction** as recursive |
+| Ridge regression | linear map u(x,0) → u(x,t\*) with bias, α chosen on validation | 1,049,600 | – | 2.1 | does the task need nonlinearity? |
+| Persistence | û = u(x,0) | 0 | – | 0 | does anything change over time? |
+| Training-mean field | û = mean of the training targets | 1,024 | – | 0 | is the input used at all? |
+
+FLOPs are computed from the architecture: matrix multiplies plus attention, 2 FLOPs per multiply-add, with
+normalization and activations ignored. Each Transformer layer is 58.7 MFLOPs on 128 tokens at width 128.
 
 **Recursive training follows TRM deep supervision.** For each of the 4 steps we:
 
@@ -147,6 +150,14 @@ The learned initial y₀ and z₀ are vectors broadcast over all patches. This i
 
 Seed 0 only. **[seed 1]** The final table will report mean ± std over 2 seeds. Latency is the median of 50
 BF16 forward passes on an otherwise idle A100-SXM4-80GB.
+
+![Parameters vs compute, coloured by accuracy](figures/params_vs_compute.png)
+
+*Each model placed by parameter count (x) and forward-pass FLOPs per sample (y), coloured by test relative L²
+(darker = more accurate). The recursive model's 4 refinement steps form a vertical column: same parameters,
+more compute. Ridge regression is drawn hollow and kept off the colour scale, since its error is about 25×
+higher. The plot shows the trade-off: moving **up** (recursion, 12× the FLOPs) gains less than moving **up and
+right** (untied depth, 12× the FLOPs and 11× the parameters).*
 
 ![Error vs refinement step and vs latency](figures/error_vs_refinement_and_latency.png)
 

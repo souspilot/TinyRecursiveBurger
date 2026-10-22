@@ -17,12 +17,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import matplotlib
 matplotlib.use("Agg")
+import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
 from pde_burgers.common import BurgersData, autocast, metrics, per_traj_rel_l2, predict
-from pde_burgers.models import build_model, core_layer_calls, count_params
+from pde_burgers.models import build_model, core_layer_calls, count_params, flops_per_sample
 
 COLORS = {"shallow": "#2a78d6", "recursive": "#eb6834", "deep": "#1baf7a", "persistence": "#8a8984",
           "ridge": "#52514e"}
@@ -77,7 +78,8 @@ def reference_baselines(data):
     (u0_tr, ut_tr), (u0_va, ut_va), (u0_te, _) = (data.split[s] for s in ("train", "val", "test"))
     mean_field = ut_tr.double().mean(0)
     out = {"mean": {"fit": {"val": metrics(mean_field.expand_as(ut_va), ut_va)},
-                    "pred": lambda u: mean_field.expand(len(u), -1).float(), "params": mean_field.numel()}}
+                    "pred": lambda u: mean_field.expand(len(u), -1).float(), "params": mean_field.numel(),
+                    "flops": 0}}
 
     X = torch.cat([data.norm(u0_tr).double(), torch.ones(len(u0_tr), 1, dtype=torch.float64, device=dev)], 1)
     Y = data.norm(ut_tr).double()
@@ -93,7 +95,8 @@ def reference_baselines(data):
         if best is None or val["rel_l2_mean"] < best[1]["rel_l2_mean"]:
             best = (a, val, W)
     a, val, W = best
-    out["ridge"] = {"fit": {"val": val, "alpha": a}, "pred": lambda u: lin(W, u), "params": W.numel()}
+    out["ridge"] = {"fit": {"val": val, "alpha": a}, "pred": lambda u: lin(W, u), "params": W.numel(),
+                    "flops": 2 * W.numel()}
     return out
 
 
@@ -128,13 +131,13 @@ def main():
     print(f"[eval] test n={len(u0)}; runs: {run_dirs}")
 
     rows = [{"model": "persistence", "run": "-", "seed": None, "params": 0, "test": metrics(u0, ut),
-             "latency_ms": {}, "core_layer_calls": 0}]
+             "latency_ms": {}, "core_layer_calls": 0, "flops": 0}]
     pertraj = {"persistence": per_traj_rel_l2(u0, ut)}
     preds_for_plot = {"persistence": u0}
     for name, ref in reference_baselines(data).items():
         pred = ref["pred"](u0)
         rows.append({"model": name, "run": "-", "seed": None, "params": ref["params"], **ref["fit"],
-                     "test": metrics(pred, ut), "latency_ms": {}, "core_layer_calls": 0})
+                     "test": metrics(pred, ut), "latency_ms": {}, "core_layer_calls": 0, "flops": ref["flops"]})
         pertraj[name], preds_for_plot[name] = per_traj_rel_l2(pred, ut), pred
         print(f"[eval] {name}: test relL2 {rows[-1]['test']['rel_l2_mean']:.5f}")
 
@@ -146,7 +149,8 @@ def main():
                "selected_epoch": ck["epoch"], "selected_step": ck["step"], "val": ck["val"],
                "test": metrics(preds[-1], ut), "train_sec": summary.get("train_sec"),
                "optimizer_steps": summary.get("optimizer_steps"), "epochs_done": summary.get("epochs_done"),
-               "core_layer_calls": core_layer_calls(name, cfg), "latency_ms": {}}
+               "core_layer_calls": core_layer_calls(name, cfg), "latency_ms": {},
+               "flops": flops_per_sample(name, cfg)}
         for bs in args.latency_batches:
             xb = u0[:bs]
             if model.recursive:
@@ -156,6 +160,7 @@ def main():
                 row["latency_ms"][bs] = latency_ms(model, data, xb, device, args.bf16)
         if model.recursive:
             row["test_per_step"] = [metrics(p_, ut) for p_ in preds]
+            row["flops_per_step"] = [flops_per_sample(name, cfg, n_steps=k) for k in range(1, model.n_sup + 1)]
         rows.append(row)
         if name not in pertraj:  # plots use the lowest-seed run of each model (run_dirs are sorted)
             pertraj[name], preds_for_plot[name] = per_traj_rel_l2(preds[-1], ut), preds[-1]
@@ -174,6 +179,7 @@ def main():
     write_table(rows, args, out)
     plot_fields(data, u0, ut, preds_for_plot, pertraj, args.out)
     plot_refinement(rows, args)
+    plot_params_compute(rows, args.out)
     print(f"[eval] wrote {args.out}/metrics.json, results.md and figures")
 
 
@@ -190,9 +196,9 @@ def write_table(rows, args, out):
     lines = [f"Test set: n={out['data']['split_sizes']['test']} trajectories, target t={out['data']['target_time_actual']}"
              f" (snapshot {out['data']['target_index']}), device {out['device']}, bf16={out['bf16']}.",
              "Mean ± sample std over seeds when more than one seed exists.", "",
-             "| model | seeds | params | core layer calls | val relL2 | test relL2 (mean) | test RMSE | "
+             "| model | seeds | params | core layer calls | MFLOPs/sample | val relL2 | test relL2 (mean) | test RMSE | "
              + " | ".join(f"latency bs={b} (ms)" for b in lb) + " | train time (min) | optimizer steps |",
-             "|" + "---|" * (9 + len(lb))]
+             "|" + "---|" * (10 + len(lb))]
     for name in ORDER:
         if name not in by:
             continue
@@ -200,20 +206,21 @@ def write_table(rows, args, out):
         g = lambda f: mean_std([f(r) for r in rs])
         lat = [fmt(*g(lambda r, b=b: final_latency(r, b)), "{:.2f}") for b in lb]
         lines.append(f"| {LABELS[name]} | {len([r for r in rs if r['seed'] is not None]) or '-'} | {rs[0]['params']:,} | "
-                     f"{rs[0]['core_layer_calls']} | {fmt(*g(lambda r: r.get('val', {}).get('rel_l2_mean')))} | "
+                     f"{rs[0]['core_layer_calls']} | {rs[0]['flops'] / 1e6:,.1f} | "
+                     f"{fmt(*g(lambda r: r.get('val', {}).get('rel_l2_mean')))} | "
                      f"{fmt(*g(lambda r: r['test']['rel_l2_mean']))} | {fmt(*g(lambda r: r['test']['rmse']))} | "
                      + " | ".join(lat) +
                      f" | {fmt(*g(lambda r: r['train_sec'] / 60 if r.get('train_sec') else None), '{:.1f}')} | "
                      f"{fmt(*g(lambda r: r.get('optimizer_steps')), '{:.0f}')} |")
     if "recursive" in by:
         lines += ["", "Recursive model after each refinement step (test, same checkpoint):", "",
-                  "| step | core layer calls | test relL2 | test RMSE | " + " | ".join(f"latency bs={b} (ms)" for b in lb) + " |",
-                  "|" + "---|" * (4 + len(lb))]
+                  "| step | core layer calls | MFLOPs/sample | test relL2 | test RMSE | " + " | ".join(f"latency bs={b} (ms)" for b in lb) + " |",
+                  "|" + "---|" * (5 + len(lb))]
         rs = by["recursive"]
         cfgl = rs[0]["core_layer_calls"] // len(rs[0]["test_per_step"])
         for k in range(len(rs[0]["test_per_step"])):
             g = lambda f: mean_std([f(r) for r in rs])
-            lines.append(f"| {k + 1} | {cfgl * (k + 1)} | {fmt(*g(lambda r: r['test_per_step'][k]['rel_l2_mean']))} | "
+            lines.append(f"| {k + 1} | {cfgl * (k + 1)} | {rs[0]['flops_per_step'][k] / 1e6:,.1f} | {fmt(*g(lambda r: r['test_per_step'][k]['rel_l2_mean']))} | "
                          f"{fmt(*g(lambda r: r['test_per_step'][k]['rmse']))} | "
                          + " | ".join(fmt(*g(lambda r, b=b: r['latency_ms'][b][k + 1]), '{:.2f}') for b in lb) + " |")
     with open(os.path.join(args.out, "results.md"), "w") as f:
@@ -316,3 +323,69 @@ def plot_refinement(rows, args):
 
 if __name__ == "__main__":
     main()
+
+
+def plot_params_compute(rows, out_dir):
+    """Parameters (x) vs FLOPs per sample (y), colour = test relative L2 (darker = more accurate).
+
+    The recursive model's refinement steps share one parameter count and form a vertical path.
+    Ridge regression is drawn hollow and kept off the colour scale: it is ~25x worse than the
+    Transformers and would compress their (much smaller) differences into one shade.
+    """
+    by = defaultdict(list)
+    for r in rows:
+        by[r["model"]].append(r)
+    err = lambda rs, f=lambda r: r["test"]["rel_l2_mean"]: float(np.mean([f(r) for r in rs]))
+    pts = []  # (label, params, flops, error)
+    for name in ("shallow", "deep"):
+        if name in by:
+            pts.append((LABELS[name], by[name][0]["params"], by[name][0]["flops"], err(by[name])))
+    rec = []
+    if "recursive" in by:
+        rs = by["recursive"]
+        for k, fl in enumerate(rs[0]["flops_per_step"]):
+            rec.append((f"step {k + 1}", rs[0]["params"], fl,
+                        err(rs, lambda r, k=k: r["test_per_step"][k]["rel_l2_mean"])))
+    allp = pts + rec
+    if not allp:
+        return
+    cmap = mcolors.LinearSegmentedColormap.from_list("acc", ["#cfe1f7", "#2a78d6", "#0b2f5e"])  # light -> dark blue
+    errs = [e for *_, e in allp]
+    norm = mcolors.Normalize(vmin=min(errs), vmax=max(errs) if max(errs) > min(errs) else min(errs) * 1.01)
+
+    fig, ax = plt.subplots(figsize=(8, 5.5))
+    if rec:
+        ax.plot([p for _, p, _, _ in rec], [f for _, _, f, _ in rec], color="#8a8984", lw=1, zorder=1)
+    for lab, p, f, e in allp:
+        ax.scatter(p, f, s=110, c=[cmap(1 - norm(e))], edgecolor="#52514e", linewidth=0.8, zorder=3)
+    for lab, p, f, e in pts:
+        ax.annotate(f"{lab}\n{e:.4f}", (p, f), textcoords="offset points", xytext=(10, -4), fontsize=8,
+                    color="#0b0b0b")
+    # refinement steps sit close together on the log axis: one-line labels on the left
+    for lab, p, f, e in rec:
+        ax.annotate(f"{lab}: {e:.4f}", (p, f), textcoords="offset points", xytext=(-10, -3), fontsize=8,
+                    ha="right", color="#0b0b0b")
+    if rec:
+        ax.annotate("recursive (2-layer core, reused)", (rec[-1][1], rec[-1][2]), textcoords="offset points",
+                    xytext=(-10, 12), fontsize=8, ha="right", color="#52514e")
+    if "ridge" in by:
+        r = by["ridge"][0]
+        ax.scatter(r["params"], r["flops"], s=110, facecolors="none", edgecolors="#8a8984", linewidth=1.5, zorder=3)
+        ax.annotate(f"ridge regression (linear)\n{r['test']['rel_l2_mean']:.3f} (off colour scale)",
+                    (r["params"], r["flops"]), textcoords="offset points", xytext=(10, -4), fontsize=8,
+                    color="#52514e")
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel("parameters")
+    ax.set_ylabel("FLOPs per sample (forward pass)")
+    xs = [p for _, p, _, _ in allp] + ([by["ridge"][0]["params"]] if "ridge" in by else [])
+    ax.set_xlim(min(xs) / 8, max(xs) * 5)  # room for the left-hand step labels and right-hand names
+    ax.margins(y=0.3)
+    _style(ax)
+    sm = plt.cm.ScalarMappable(cmap=mcolors.LinearSegmentedColormap.from_list(
+        "acc_r", ["#0b2f5e", "#2a78d6", "#cfe1f7"]), norm=norm)
+    cb = fig.colorbar(sm, ax=ax)
+    cb.set_label("test mean relative L2 (darker = more accurate)")
+    fig.tight_layout()
+    fig.savefig(os.path.join(out_dir, "params_vs_compute.png"), dpi=150)
+    plt.close(fig)
