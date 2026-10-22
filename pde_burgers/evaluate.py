@@ -239,34 +239,68 @@ def _style(ax):
 
 
 def plot_fields(data, u0, ut, preds, pertraj, out_dir):
-    """Three test trajectories at the 10th/50th/90th percentile of the reference model's error."""
+    """Three test trajectories at the 10th/50th/90th percentile of the reference model's error.
+
+    Rows: (1) u(x,0) and the true u(x,t*); (2) predictions over the truth, drawn as a wide band, y-range fitted
+    to the truth; (3) zoom on the steepest front with the truth as one dot per grid point; (4) |error|.
+    """
     ref = "recursive" if "recursive" in pertraj else ("shallow" if "shallow" in pertraj else "persistence")
     err = pertraj[ref]
     picks = [int(np.argsort(err)[int(q * (len(err) - 1))]) for q in (0.1, 0.5, 0.9)]
-    x = data.x
-    models = [m for m in ("ridge", "shallow", "recursive", "deep") if m in preds]
-    fig, axes = plt.subplots(2, 3, figsize=(15, 7), sharex=True)
+    x = np.asarray(data.x)
+    n, dx = len(x), float(np.mean(np.diff(data.x)))
+    nets = [m for m in ("shallow", "recursive", "deep") if m in preds]
+    errs = [m for m in ("ridge",) + tuple(nets) if m in preds]
+    style = lambda m: {"color": COLORS[m], "ls": ":" if m == "ridge" else "-"}
+    band = {"color": "#0b0b0b", "alpha": 0.22, "lw": 7, "solid_capstyle": "round"}  # truth drawn as a wide band
+    W = 48  # zoom half-width in grid points (~0.05 in x)
+    fig, axes = plt.subplots(4, 3, figsize=(15, 13), gridspec_kw={"height_ratios": [1, 1.1, 1.1, 1]})
     for j, (i, q) in enumerate(zip(picks, ("p10", "median", "p90"))):
+        u_in, u_true = u0[i].cpu().numpy(), ut[i].cpu().numpy()
+        p = {m: preds[m][i].cpu().numpy() for m in errs}
+
+        # row 1: the physics -- initial condition and true solution only
         ax = axes[0, j]
-        ax.plot(x, u0[i].cpu(), color=COLORS["persistence"], lw=1.2, ls="--", label="u(x,0)")
-        ax.plot(x, ut[i].cpu(), color="#0b0b0b", lw=2, label="true u(x,t*)")
-        for m in models:
-            ax.plot(x, preds[m][i].cpu(), color=COLORS[m], lw=1.4, label=LABELS[m],
-                    ls=":" if m == "ridge" else "-")
+        ax.plot(x, u_in, color=COLORS["persistence"], lw=1.3, ls="--")
+        ax.plot(x, u_true, color="#0b0b0b", lw=2)
         ax.set_title(f"test #{data.idx['test'][i].item()} ({q} of {ref} error)")
-        _style(ax)
-        ax2 = axes[1, j]
-        for m in models:
-            ax2.plot(x, (preds[m][i] - ut[i]).abs().cpu(), color=COLORS[m], lw=1.2, label=LABELS[m],
-                     ls=":" if m == "ridge" else "-")
-        ax2.set_yscale("log")
-        ax2.set_xlabel("x")
-        _style(ax2)
-    axes[0, 0].set_ylabel("u")
-    axes[1, 0].set_ylabel("|prediction − truth|")
-    handles, labels = axes[0, 0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="lower center", ncol=len(labels), fontsize=9, frameon=False)
-    fig.tight_layout(rect=(0, 0.05, 1, 1))
+
+        # row 2: predictions on top of the truth band, y-range fitted to the truth
+        ax = axes[1, j]
+        ax.plot(x, u_true, zorder=1, **band)
+        for m in nets:
+            ax.plot(x, p[m], lw=1.3, zorder=2, **style(m))
+        lo, hi = u_true.min(), u_true.max()
+        pad = 0.15 * (hi - lo) + 1e-6
+        ax.set_ylim(lo - pad, hi + pad)
+
+        # row 3: zoom on the steepest front of the true solution (periodic, centred on the front)
+        ax = axes[2, j]
+        c = int(np.argmax(np.abs(np.roll(u_true, -1) - u_true)))
+        sh = n // 2 - c
+        sl = slice(n // 2 - W, n // 2 + W + 1)
+        xr = (np.arange(n) - n // 2)[sl] * dx
+        for m in nets:
+            ax.plot(xr, np.roll(p[m], sh)[sl], lw=1.6, zorder=2, **style(m))
+        ax.plot(xr, np.roll(u_true, sh)[sl], "o", color="#0b0b0b", ms=3, zorder=3)
+        ax.set_xlabel(f"x − x_front  (front at x = {x[c]:.3f})")
+
+        # row 4: pointwise error
+        ax = axes[3, j]
+        for m in errs:
+            ax.plot(x, np.abs(p[m] - u_true), lw=1.2, **style(m))
+        ax.set_yscale("log")
+        ax.set_xlabel("x")
+        for r in range(4):
+            _style(axes[r, j])
+    for r, lab in enumerate(("u", "u at t*", "u near the front", "|prediction − truth|")):
+        axes[r, 0].set_ylabel(lab)
+    from matplotlib.lines import Line2D
+    handles = [Line2D([], [], color=COLORS["persistence"], lw=1.3, ls="--", label="u(x,0)"),
+               Line2D([], [], color="#0b0b0b", lw=2, label="true u(x,t*) (line / band / dots)")] + \
+              [Line2D([], [], lw=1.4, label=LABELS[m], **style(m)) for m in errs]
+    fig.legend(handles=handles, loc="lower center", ncol=len(handles), fontsize=9, frameon=False)
+    fig.tight_layout(rect=(0, 0.03, 1, 1))
     fig.savefig(os.path.join(out_dir, "fields.png"), dpi=150)
     plt.close(fig)
 

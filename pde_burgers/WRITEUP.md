@@ -212,8 +212,10 @@ hardly changes across steps. In these examples, step 4's extra error appears ove
 
 ![True vs predicted fields and spatial errors](figures/fields.png)
 
-*Top: u(x,0) (dashed), the true u(x,1) (black), and each model's prediction. Bottom: |error| on a log scale.
-The three columns are the 10th, 50th and 90th percentile test trajectories by recursive-model error.*
+*Columns: the 10th, 50th and 90th percentile test trajectories by recursive-model error. Row 1: the initial
+condition u(x,0) (dashed) and the true u(x,1) (black). Row 2: each model's prediction over the true solution,
+drawn as a gray band, with the y-axis fitted to the solution. Row 3: a zoom on the steepest front, with the true
+solution as one dot per grid point. Row 4: |error| on a log scale.*
 
 What the examples show:
 
