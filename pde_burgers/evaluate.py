@@ -126,8 +126,13 @@ def main():
 
     data = BurgersData(args.data_cache, device)
     u0, ut = data.split["test"]
-    run_dirs = sorted(d for d in glob.glob(args.runs)
-                      if os.path.exists(os.path.join(d, "best_ema.pt")) and "overfit" not in d)
+    # summary.json is written only when training ends, so unfinished runs (whose best_ema.pt is a
+    # mid-training checkpoint) are skipped
+    candidates = sorted(d for d in glob.glob(args.runs) if "overfit" not in d
+                        and os.path.exists(os.path.join(d, "best_ema.pt")))
+    run_dirs = [d for d in candidates if os.path.exists(os.path.join(d, "summary.json"))]
+    for d in sorted(set(candidates) - set(run_dirs)):
+        print(f"[eval] skipping {d}: no summary.json (training not finished)")
     print(f"[eval] test n={len(u0)}; runs: {run_dirs}")
 
     rows = [{"model": "persistence", "run": "-", "seed": None, "params": 0, "test": metrics(u0, ut),

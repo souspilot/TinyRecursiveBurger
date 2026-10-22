@@ -2,18 +2,25 @@
 
 ### TRM-style recursive refinement on PDEBench 1D Burgers, with controls for size and compute
 
-> **Status.** All numbers below are from **seed 0**, which is complete: 3 models, test set evaluated.
-> Seed 1, and a control that matches the number of optimizer updates, are still running. Places that will
-> change are marked **[seed 1]**. Until seed 1 is in, treat differences of about 10% as unconfirmed.
+> **Status.** Final. 2 seeds per model (mean ± sample std), plus a control that matches the number of
+> optimizer updates. Two seeds give a rough spread, not confidence intervals.
 
-**TL;DR.** A 2-layer Transformer applied recursively, 12 core calls per prediction, reaches **0.0140** test
-relative L² on predicting u(x, t=1) from u(x, 0). That is **9% better** than the same network applied once
-(0.0153), and **10% worse** than a 24-layer untied network that does the same computation (0.0126). The
-recursive model has **11× fewer parameters** than the 24-layer one at about the same latency. On RMSE the
-order changes: recursive is best (0.0075 vs 0.0149). Refinement steps 1→3 improve the prediction and step 4
-makes it worse. Our conclusion: **recursion is parameter-efficient here, but on the primary metric it did not
-beat spending the same computation on untied depth.** All three Transformers are about 25× better than the best
-linear map, so the task is learnt and needs nonlinearity.
+**TL;DR.** On PDEBench 1D Burgers (ν = 0.01), predicting u(x, t=1) from u(x, 0):
+
+* A 2-layer Transformer applied recursively (TRM-style, 12 core calls) reaches **0.0135 ± 0.0007** test relative L².
+* A 24-layer untied Transformer with the **same computation** reaches **0.0131 ± 0.0006**. That is a tie, with
+  11× more parameters.
+* The **same 2-layer network applied once** looks worse (0.0172 ± 0.0026). **But given the same number of
+  optimizer updates as the recursive model, it reaches 0.0112 ± 0.0017**, better than both, at 1/12 of the
+  inference compute.
+* Recursion's one consistent advantage is **RMSE**: 0.0073 ± 0.0003, against 0.0108–0.0129 for every other model,
+  in both seeds.
+* Refinement steps 1→3 improve the prediction, and step 4 makes it worse.
+
+**We find no evidence that recursion improves the primary metric.** Its advantage over the same-size network
+is explained by longer training, and it only ties untied depth. It may help on high-amplitude, shock-dominated
+cases, which is what the RMSE result suggests; that needs a targeted test. All Transformers are about 25×
+better than the best linear map, so the task is learnt and needs nonlinearity.
 
 ---
 
@@ -87,7 +94,7 @@ refinement step of the recursive model predicts the same t\*; the steps are *not
 | Normalization | One scalar mean and std (−0.0124, 0.7151) fitted on the training split only, then inverted before computing any metric |
 | Metrics | **Mean per-trajectory relative L²**, ‖û − u‖₂ / ‖u‖₂ (primary), and RMSE in physical units |
 | Selection | EMA weights (decay 0.999) chosen by best **validation** relative L². The test set is touched once, by `evaluate.py`. |
-| Optimization | AdamW, lr 3·10⁻⁴, weight decay 0.01, gradient clipping 1.0, batch 64, BF16, 200-step warmup then cosine decay, **1,000 epochs for every model** |
+| Optimization | AdamW, lr 3·10⁻⁴, weight decay 0.01, gradient clipping 1.0, batch 64, BF16, 200-step warmup then cosine decay, **1,000 epochs for every model** (except the 4× control) |
 
 ### Models
 
@@ -114,6 +121,7 @@ flowchart LR
 |---|---|---|---|---:|---|
 | **Recursive (TRM-style)** | 2 layers, reused: n = 2 z-updates + 1 y-update per step, K = 4 steps | 415,624 | 4 × 3 × 2 = **24** | 1,410 | the method being tested |
 | Shallow | 2 layers, applied once | 415,368 | 2 | 118 | **same parameter count** as recursive |
+| Shallow, 4× epochs | as shallow, trained for 4,000 epochs (500k updates) | 415,368 | 2 | 118 | **same number of optimizer updates** as recursive |
 | Deep | 24 untied layers, applied once | 4,777,352 | **24** | 1,410 | **same computation per prediction** as recursive |
 | Ridge regression | linear map u(x,0) → u(x,t\*) with bias, α chosen on validation | 1,049,600 | – | 2.1 | does the task need nonlinearity? |
 | Persistence | û = u(x,0) | 0 | – | 0 | does anything change over time? |
@@ -137,27 +145,36 @@ The learned initial y₀ and z₀ are vectors broadcast over all patches. This i
 
 ## 3. Results
 
-### 3.1 Main table (test set, n = 1,000)
+### 3.1 Main table (test set, n = 1,000; mean ± std over 2 seeds)
 
-| Model | Params | Layer apps | Val rel L² | **Test rel L²** | Test RMSE | Latency, batch 1 (ms) | Latency, batch 1000 (ms) | Train time (min) | Optimizer steps |
+| Model | Params | MFLOPs/sample | Val rel L² | **Test rel L²** | Test RMSE | Latency, batch 1 (ms) | Latency, batch 1000 (ms) | Train time, seed 0 (min) | Optimizer steps |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Training-mean field | 1,024 | – | 0.9999 | 1.0047 | 0.6026 | – | – | – | – |
-| Persistence u(x,0) | 0 | – | – | 1.7669 | 0.5237 | – | – | – | – |
-| Ridge regression | 1,049,600 | – | 0.3592 | 0.3434 | 0.1335 | – | – | – | – |
-| Shallow (2-layer) | 415,368 | 2 | 0.01537 | 0.01533 | 0.00992 | **1.14** | **4.36** | **17.0** | 125k |
-| **Recursive (TRM-style)** | 415,624 | 24 | 0.01370 | 0.01397 | **0.00752** | 8.66 | 49.94 | 141.5 | 500k |
-| Deep (24-layer untied) | 4,777,352 | 24 | **0.01265** | **0.01263** | 0.01490 | 10.38 | 44.70 | 112.5 | 125k |
+| Training-mean field | 1,024 | 0 | 0.9999 | 1.0047 | 0.6026 | – | – | – | – |
+| Persistence u(x,0) | 0 | 0 | – | 1.7669 | 0.5237 | – | – | – | – |
+| Ridge regression | 1,049,600 | 2.1 | 0.3592 | 0.3434 | 0.1335 | – | – | – | – |
+| Shallow (2-layer) | 415,368 | 118 | 0.0174 ± 0.0028 | 0.0172 ± 0.0026 | 0.0113 ± 0.0019 | **1.15** | **4.36** | **17.0** | 125k |
+| **Shallow, 4× epochs** | 415,368 | 118 | **0.0116 ± 0.0019** | **0.0112 ± 0.0017** | 0.0108 ± 0.0022 | **1.16** | 4.62 | 53.0\* | 500k |
+| Recursive (TRM-style) | 415,624 | 1,410 | 0.0131 ± 0.0008 | 0.0135 ± 0.0007 | **0.0073 ± 0.0003** | 8.66 | 50.02 | 141.5 | 500k |
+| Deep (24-layer untied) | 4,777,352 | 1,410 | 0.0131 ± 0.0006 | 0.0131 ± 0.0006 | 0.0129 ± 0.0029 | 10.41 | 44.78 | 112.5 | 125k |
 
-Seed 0 only. **[seed 1]** The final table will report mean ± std over 2 seeds. Latency is the median of 50
-BF16 forward passes on an otherwise idle A100-SXM4-80GB.
+Latency is the median of 50 BF16 forward passes on an A100-SXM4-80GB. Training times are from seed 0, which
+ran alone on its GPU. Seed-1 runs shared a GPU with another job, so their times are inflated. \*The 4× control
+shared its GPU with another training job the whole time. Even so, its pace (0.8 s/epoch) was no slower than
+the solo shallow run (1.0 s/epoch).
+
+**Per-seed test relative L².** Shallow 0.0153 / 0.0190. Shallow 4× 0.0100 / 0.0124. Recursive 0.0140 / 0.0131.
+Deep 0.0126 / 0.0135. **Both seeds of the 4× shallow model beat both recursive seeds.** The recursive and deep
+seeds overlap. On RMSE, both recursive seeds (0.0075 / 0.0071) beat every seed of every other model.
 
 ![Parameters vs compute, coloured by accuracy](figures/params_vs_compute.png)
 
 *Each model placed by parameter count (x) and forward-pass FLOPs per sample (y), coloured by test relative L²
-(darker = more accurate). The recursive model's 4 refinement steps form a vertical column: same parameters,
-more compute. Ridge regression is drawn hollow and kept off the colour scale, since its error is about 25×
-higher. The plot shows the trade-off: moving **up** (recursion, 12× the FLOPs) gains less than moving **up and
-right** (untied depth, 12× the FLOPs and 11× the parameters).*
+(darker = more accurate, mean over seeds). The recursive model's 4 refinement steps form a vertical column: same
+parameters, more compute. Ridge regression is drawn hollow and kept off the colour scale, since its error is
+about 25× higher. Moving **up** (recursion, 12× the FLOPs) and moving **up and right** (untied depth, 12× the
+FLOPs and 11× the parameters) reach about the same error. Not shown: the 4×-epoch shallow model sits at the
+shallow model's position (same parameters and FLOPs) and is more accurate than every point on this plot.
+Inference compute is not what limits the small model; training length is.*
 
 ![Error vs refinement step and vs latency](figures/error_vs_refinement_and_latency.png)
 
@@ -165,14 +182,14 @@ right** (untied depth, 12× the FLOPs and 11× the parameters).*
 and deep controls. Persistence and ridge regression are left out because they are 20–100× worse; they are in
 the table. Right: the same errors plotted against measured inference latency at batch 1000.*
 
-### 3.2 Recursive model after each refinement step (same checkpoint)
+### 3.2 Recursive model after each refinement step (same checkpoint, mean ± std over 2 seeds)
 
-| Step | Layer apps | Val rel L² | Test rel L² | Test RMSE | Latency, batch 1 (ms) | Latency, batch 1000 (ms) |
+| Step | Layer apps | MFLOPs/sample | Test rel L² | Test RMSE | Latency, batch 1 (ms) | Latency, batch 1000 (ms) |
 |---|---:|---:|---:|---:|---:|---:|
-| 1 | 6 | 0.01346 | 0.01363 | 0.00849 | 2.51 | 12.67 |
-| 2 | 12 | 0.01312 | 0.01352 | 0.00777 | 4.57 | 25.09 |
-| 3 | 18 | **0.01299** | **0.01322** | **0.00747** | 6.62 | 37.51 |
-| 4 (reported) | 24 | 0.01370 | 0.01397 | 0.00752 | 8.66 | 49.94 |
+| 1 | 6 | 353 | 0.0133 ± 0.0005 | 0.0084 ± 0.0002 | 2.54 | 12.68 |
+| 2 | 12 | 705 | 0.0129 ± 0.0008 | 0.0076 ± 0.0002 | 4.57 | 25.15 |
+| 3 | 18 | 1,058 | **0.0128 ± 0.0007** | **0.0073 ± 0.0003** | 6.62 | 37.60 |
+| 4 (reported) | 24 | 1,410 | 0.0135 ± 0.0007 | 0.0073 ± 0.0003 | 8.66 | 50.02 |
 
 ![Recursive model: spatial error by refinement step](figures/recursive_spatial_error_by_step.png)
 
@@ -212,7 +229,8 @@ are listed in the table. They are included to show the scale of error that stron
 | FNO paper, Table 3 ([Li et al., ICLR 2021](https://arxiv.org/abs/2010.08895)) | Own dataset: ν = 0.1 (more diffusive), Gaussian random field initial conditions, **1,000** training samples | **Same task form**: u(x,0) ↦ u(x,1), relative L², at 1,024 points | FNO | **0.0160** |
 | | | | LNO / MGNO / GNO | 0.0217 / 0.0374 / 0.0651 |
 | | | | PCA-NN / FCN | 0.0391 / 0.1877 |
-| **This study** | PDEBench ν = 0.01, 8,000 train | u(x,0) ↦ u(x,1), relative L², at 1,024 points | Shallow / Recursive / Deep Transformer | 0.0153 / 0.0140 / 0.0126 |
+| **This study** | PDEBench ν = 0.01, 8,000 train | u(x,0) ↦ u(x,1), relative L², at 1,024 points | Shallow / Recursive / Deep Transformer | 0.0172 / 0.0135 / 0.0131 |
+| | | | Shallow, 4× epochs | **0.0112** |
 
 PDEBench's nRMSE, ‖û − u‖₂/‖u‖₂, has the same form as our metric, but there it is averaged over a rollout of
 many steps, which accumulates error. Our Transformers fall in the same error range as FNO on the
@@ -225,54 +243,55 @@ inductive biases remain strong on periodic 1D problems.
 ## 4. What the results say
 
 1. **The task is learnt and needs nonlinearity.** The training-mean field scores 1.00, persistence 1.77 (the
-   solution changes a lot by t = 1) and ridge regression 0.34. All three Transformers reach 0.013–0.015, which
-   is **about 25× better than the best linear map**. The best linear map essentially predicts only the conserved
-   mean (§3.3). The models are learning the nonlinear steepening and the shock positions, not just a linear
-   filter.
+   solution changes a lot by t = 1) and ridge regression 0.34. Every Transformer reaches 0.011–0.017, which is
+   **about 25× better than the best linear map**. The best linear map essentially predicts only the conserved
+   mean (§3.3). The models are learning the nonlinear steepening and the shock positions.
 
-2. **Recursion beats the same-size network, at a large cost.** Relative L² improves by 9% (0.0153 → 0.0140)
-   and RMSE by 24%. The price is 7.6× the latency at batch 1, 8.3× the training time, and 4× the optimizer
-   updates.
+2. **Recursion's apparent advantage over the same-size network comes from training length.** With equal
+   epochs, recursive beats shallow by 21% (0.0135 vs 0.0172). But in our TRM-style training the recursive model
+   makes 4 optimizer updates per batch. **Given the same 500k updates, the plain 2-layer network reaches 0.0112,
+   17% better than recursive**, in both seeds, with 1/12 of the inference FLOPs and 1/7.5 of the latency. The
+   shallow model at 1,000 epochs was undertrained. Its seeds also varied widely (0.0153 vs 0.0190), which is
+   another sign of that.
 
-3. **Recursion does not beat untied depth at equal computation on the primary metric.** The 24-layer untied
-   network reaches 0.0126, 10% better than the recursive model, at similar latency (10.4 vs 8.7 ms at batch 1).
-   **The recursive model gets within about 10% of it with 11× fewer parameters.** That is the parameter-efficiency
-   argument TRM makes, and in this setting it holds.
+3. **Recursion ties untied depth at equal computation.** Recursive (0.0135 ± 0.0007) and deep (0.0131 ± 0.0006)
+   are within one standard deviation, and their seeds overlap. The 10% gap seen with seed 0 alone was mostly seed
+   noise. **Recursion reaches the deep model's accuracy with 11× fewer parameters.** That is TRM's
+   parameter-efficiency argument, and it holds here. But it buys no accuracy over the deep model, and neither
+   beats a small model trained longer.
 
-4. **The ranking depends on the metric.** On RMSE, recursive (0.0075) beats both shallow (0.0099) and deep
-   (0.0149). Mean relative L² gives every trajectory equal weight, while RMSE is dominated by large-amplitude
-   trajectories. The deep model's RMSE also moved a lot between validation (0.0138) and test (0.0149), so it is
-   driven by a few trajectories and is noisy. **[seed 1]** will show whether the RMSE ordering holds.
+4. **RMSE is where recursion stands out, consistently.** Recursive RMSE is 0.0073 ± 0.0003, against 0.0108
+   (shallow 4×), 0.0113 (shallow) and 0.0129 (deep), and both recursive seeds beat every other seed. Mean
+   relative L² weights every trajectory equally, while RMSE pools absolute errors and is dominated by
+   **high-amplitude trajectories, which are the ones with the strongest shocks**. So recursion seems to help on
+   exactly the cases that make Burgers hard, while doing no better, or worse, on low-amplitude smooth ones. This is
+   a hypothesis the RMSE result suggests, not one we tested. Section 6 lists a direct test.
 
-5. **Refinement helps, then overshoots.** Error falls from step 1 to step 3 (0.0136 → 0.0132), then **rises
-   at step 4 to 0.0140**, which is worse than step 1. The same pattern appears on validation and test, and in
-   the overfitting sanity run. Step 3 (18 layer applications) comes within about 5% of the deep model at 64% of
-   its latency. In the example trajectories, step 4's extra error sits on the smooth ramps, not at the shocks
-   (§3.2 figure). The last step appears to add small-scale noise rather than misplace fronts. Because the protocol fixed step 4 as the reported output before training, we report step 4
-   and treat step 3 as an exploratory observation, not a tuned result.
-
-6. **Most of the gain arrives within the first step.** Step 1 already beats the shallow model (0.0136 vs
-   0.0153). One step is 3 core calls, i.e. 6 layer applications, against shallow's 2, and its weights received
-   4× the optimizer updates. Repeated refinement (steps 2–4) adds little on top.
-   **[control]** A shallow model trained for 4,000 epochs (500k updates, the same as recursive) is running. If
-   it closes the gap, the advantage over shallow comes from extra updates, not from depth or recursion.
+5. **Refinement helps, then overshoots.** Error falls from step 1 to step 3 (0.0133 → 0.0128), then **rises at
+   step 4 to 0.0135**, worse than step 1. This happens in both seeds, on validation and test, and in the
+   overfitting sanity run. In the example trajectories, step 4's extra error sits on the smooth ramps, not at the
+   shocks (§3.2 figure). Step 3 alone (0.0128) would edge out the deep model at 75% of its FLOPs. But the protocol
+   fixed step 4 as the output before training, so step 3 is an exploratory observation, not a result.
 
 ### Verdict
 
-On this problem, **TRM-style recursion is a parameter-efficient way to buy depth, but it is not a better use of
-compute than ordinary depth.** We do not claim recursion helps. It beats the same-size control, but it does not
-beat the same-compute control on relative L², and its last refinement step hurts. **[seed 1]** may tighten or
-overturn the gaps of about 10%.
+**On the primary metric, TRM-style recursion did not beat the controls.** Its gain over a same-size network
+disappears once that network gets the same number of optimizer updates, and it only ties untied depth of equal
+compute, though with 11× fewer parameters. If you have a fixed training budget of updates and want accuracy, a
+small non-recursive Transformer trained longer was the best option here, and 12× cheaper at inference. The
+remaining open question is **RMSE**: recursion's large, seed-consistent RMSE advantage suggests it handles
+high-amplitude, shock-dominated trajectories better, and that is worth testing directly.
 
 ---
 
 ## 5. Limitations
 
-* **Seeds.** Seed 0 only so far. Seed 1 is running for all three models. Two seeds give a rough spread, not
-  confidence intervals.
-* **Unequal training compute is part of the design.** With equal epochs, the recursive model makes 4× the
-  optimizer updates and runs 12× the core calls per batch. The 4× update control addresses the first point for
-  the shallow model only.
+* **Seeds.** Two seeds per model give a rough spread, not confidence intervals. The shallow-vs-recursive
+  ordering under equal updates holds for every seed pair. The recursive-vs-deep comparison is a tie.
+* **Training was not converged, and the update-matched control covers only the shallow model.** Going from
+  1,000 to 4,000 epochs cut the shallow model's error by 35%. The deep and recursive models may also improve
+  with longer training. We did not run them at 4× (deep), or give the recursive model 4× epochs (it would need
+  2M updates). The rankings at convergence are unknown.
 * **A single configuration.** One viscosity, one target time, one train size, and n = 2, K = 4 fixed in
   advance. There was no hyperparameter search for any model, and one learning-rate schedule was shared by
   all, which may suit some models better than others.
@@ -289,13 +308,15 @@ overturn the gaps of about 10%.
 
 ## 6. Next steps
 
-1. Report 2–3 seeds per model (in progress), and the update-matched control.
-2. Run FNO and U-Net under exactly this protocol.
-3. Test whether the step-4 overshoot is fixable: weight later steps' losses more heavily, use a lower learning
+1. **Test the RMSE hypothesis directly.** Bin test trajectories by amplitude or shock strength (e.g. max |∂ₓu|
+   at t = 1) and compare per-bin error across models.
+2. Train all models to convergence (or for equal wall-clock time) and re-rank them, with 3+ seeds.
+3. Run FNO and U-Net under exactly this protocol.
+4. Test whether the step-4 overshoot is fixable: weight later steps' losses more heavily, use a lower learning
    rate for the recursive model, or select the best step on validation as part of the method.
-4. Make the computation adaptive: run more refinement steps on hard trajectories (those with shocks), as in TRM's
+5. Make the computation adaptive: run more refinement steps on hard trajectories (those with shocks), as in TRM's
    learned halting.
-5. Sweep viscosity (ν = 0.001 → 1.0) and target time to see whether recursion helps more when shocks are sharper.
+6. Sweep viscosity (ν = 0.001 → 1.0) and target time to see whether recursion helps more when shocks are sharper.
 
 ---
 
