@@ -326,9 +326,6 @@ def plot_refinement(rows, args):
     plt.close(fig)
 
 
-if __name__ == "__main__":
-    main()
-
 
 def plot_params_compute(rows, out_dir):
     """Parameters (x) vs FLOPs per sample (y), colour = test relative L2 (darker = more accurate).
@@ -394,3 +391,7 @@ def plot_params_compute(rows, out_dir):
     fig.tight_layout()
     fig.savefig(os.path.join(out_dir, "params_vs_compute.png"), dpi=150)
     plt.close(fig)
+
+
+if __name__ == "__main__":
+    main()
