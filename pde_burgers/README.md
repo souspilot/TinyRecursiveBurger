@@ -65,7 +65,7 @@ To resume a crashed run, re-run its `python -m pde_burgers.train ...` command wi
   metrics, and validation error per refinement step for the recursive model), `best_ema.pt` (the selected
   checkpoint), `last.pt` (for resuming), `summary.json` (params, training time, optimizer steps)
 * `results/metrics.json` and `results/results.md`: test mean per-trajectory relative L², physical-unit RMSE,
-  parameters, core layer calls, latency at batch 1 and batch 1000, training time, persistence baseline, and the
+  parameters, core layer calls, latency at batch 1 and batch 1000, training time, reference baselines (persistence; training-mean field; ridge regression fit on train with alpha chosen on val), and the
   recursive model after steps 1–4. With multiple seeds, mean ± std is shown.
 * `results/fields.png`: true and predicted fields plus |error| for test trajectories at the 10th, 50th and 90th
   error percentiles. `results/recursive_spatial_error_by_step.png`. `results/error_vs_refinement_and_latency.png`.
