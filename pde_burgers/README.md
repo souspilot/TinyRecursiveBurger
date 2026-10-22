@@ -70,6 +70,21 @@ To resume a crashed run, re-run its `python -m pde_burgers.train ...` command wi
 * `results/fields.png`: true and predicted fields plus |error| for test trajectories at the 10th, 50th and 90th
   error percentiles. `results/recursive_spatial_error_by_step.png`. `results/error_vs_refinement_and_latency.png`.
 
+## Error by shock strength (follow-up analysis)
+
+Recursion's RMSE advantage suggests it does better on high-amplitude, shock-dominated trajectories. To test
+that, bin the test set by features of the true target (amplitude max−min, and max |∂u/∂x| as a measure of
+shock strength) and compare each model's error per bin:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python -m pde_burgers.analyze_by_amplitude --runs 'runs/*_s*' 'runs_extra/shallow4x_s*' --out results_by_amplitude
+```
+
+This writes `results_by_amplitude/by_amplitude.md` and `results_by_amplitude/error_by_shock_strength.png`. The
+markdown file has, for each bin: mean relative L², RMSE, each bin's share of the model's total squared error,
+and the recursive model's error after each refinement step. Only finished runs (with `summary.json`) are used.
+Runs are grouped by directory name without the `_s<seed>` suffix.
+
 ## Local smoke test (no GPU, synthetic data)
 
 ```bash
