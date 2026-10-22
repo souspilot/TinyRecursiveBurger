@@ -1,0 +1,19 @@
+{
+ "model": "shallow",
+ "seed": 0,
+ "params": 415368,
+ "epochs_done": 5000,
+ "epochs_planned": 5000,
+ "optimizer_steps": 5000,
+ "train_sec": 58.24754743091762,
+ "best": {
+  "rel_l2_mean": 0.03108197439452727,
+  "rel_l2_median": 0.017988474346738614,
+  "rel_l2_std": 0.03373477068203436,
+  "rmse": 0.008707751622505295,
+  "epoch": 4899,
+  "step": 4900
+ },
+ "core_layer_calls_per_pred": 2,
+ "gpu": "NVIDIA A100-SXM4-80GB"
+}

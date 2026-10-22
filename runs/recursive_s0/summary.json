@@ -1,0 +1,25 @@
+{
+ "model": "recursive",
+ "seed": 0,
+ "params": 415624,
+ "epochs_done": 1000,
+ "epochs_planned": 1000,
+ "optimizer_steps": 500000,
+ "train_sec": 8492.675013041124,
+ "best": {
+  "rel_l2_mean": 0.013698450451868524,
+  "rel_l2_median": 0.01005095417065741,
+  "rel_l2_std": 0.013511501118838958,
+  "rmse": 0.01053856409433702,
+  "rel_l2_per_step": [
+   0.013460828310667795,
+   0.013115507707864257,
+   0.012988547069105781,
+   0.013698450451868524
+  ],
+  "epoch": 984,
+  "step": 492500
+ },
+ "core_layer_calls_per_pred": 24,
+ "gpu": "NVIDIA A100-SXM4-80GB"
+}

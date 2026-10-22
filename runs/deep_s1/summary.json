@@ -1,0 +1,19 @@
+{
+ "model": "deep",
+ "seed": 1,
+ "params": 4777352,
+ "epochs_done": 1000,
+ "epochs_planned": 1000,
+ "optimizer_steps": 125000,
+ "train_sec": 7055.205254983157,
+ "best": {
+  "rel_l2_mean": 0.013534327989281543,
+  "rel_l2_median": 0.008328232009077244,
+  "rel_l2_std": 0.015290530132079913,
+  "rmse": 0.013292151746235041,
+  "epoch": 989,
+  "step": 123750
+ },
+ "core_layer_calls_per_pred": 24,
+ "gpu": "NVIDIA A100-SXM4-80GB"
+}
