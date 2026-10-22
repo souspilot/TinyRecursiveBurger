@@ -1,0 +1,16 @@
+# conda env create -f pde_burgers/environment.yml && conda activate trm-burgers
+# PyTorch comes from the CUDA 12.6 wheel index (needs an NVIDIA driver >= 525 via CUDA 12 minor-version compatibility; on a CPU-only
+# machine or a Mac, pip falls back to the regular PyPI wheel, which runs on CPU).
+name: trm-burgers
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - pip
+  - pip:
+      - --extra-index-url https://download.pytorch.org/whl/cu126
+      - torch==2.7.1
+      - numpy
+      - h5py
+      - matplotlib
+      - pyyaml

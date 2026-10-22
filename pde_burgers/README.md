@@ -29,10 +29,10 @@ Every setting is in [`config.yaml`](config.yaml). Any key can be overridden as `
 ## Exact commands (server)
 
 ```bash
-git clone <your-repo-url> trm-burgers && cd trm-burgers
-# torch with CUDA must already be installed, e.g.:
-# pip install torch --index-url https://download.pytorch.org/whl/cu126
-bash pde_burgers/run_server.sh setup        # numpy h5py matplotlib pyyaml
+git clone git@github.com:souspilot/TinyRecursiveBurger.git && cd TinyRecursiveBurger
+conda env create -f pde_burgers/environment.yml   # Python 3.12, torch 2.7.1 (CUDA 12.6 wheels)
+conda activate trm-burgers
+python -c "import torch; print(torch.cuda.is_available(), torch.cuda.device_count())"   # expect: True 2
 bash pde_burgers/run_server.sh data         # about 8 GB download, MD5 check, then logs/prepare_data.log
 ```
 **Check `logs/prepare_data.log` before training.** It records the tensor shape, the `t-coordinate` length

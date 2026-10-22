@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # End-to-end driver for the 2xA100 server. Run stages individually:
+# First: conda env create -f pde_burgers/environment.yml && conda activate trm-burgers
 #   bash pde_burgers/run_server.sh setup | data | sanity | bench | train | train_seed1 | eval
 # Set EPOCHS_* from the `bench` stage output before `train`.
 set -euo pipefail
@@ -15,6 +16,7 @@ mkdir -p logs
 
 case "${1:-}" in
   setup)
+    # only needed outside the conda env (environment.yml already installs these)
     pip install -r pde_burgers/requirements.txt ;;
   data)
     python -m pde_burgers.download --root_folder data/pdebench
