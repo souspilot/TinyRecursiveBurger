@@ -4,3 +4,5 @@ results/
 logs/
 __pycache__/
 *.pyc
+# resume-only training state (optimizer etc.); best_ema.pt is the shipped checkpoint
+last.pt
