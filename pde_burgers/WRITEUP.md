@@ -15,12 +15,18 @@
   inference compute.
 * Recursion's one consistent advantage is **RMSE**: 0.0073 ± 0.0003, against 0.0108–0.0129 for every other model,
   in both seeds.
-* Refinement steps 1→3 improve the prediction, and step 4 makes it worse.
+* **Splitting the test set by shock strength explains why.** The recursive model's error is almost flat from the
+  smoothest to the most shocked quarter of trajectories (×1.08). Every other model's error grows ×1.6–2.0. On
+  the strongest shocks recursion has the lowest error, including 43% lower RMSE. On smooth cases it is among
+  the worst.
+* Refinement depends on difficulty. On the strongest shocks, steps 1→3 cut the error by 12%. On smooth cases
+  step 1 is best, and the later steps add error. That is where the step-4 overshoot comes from.
 
-**We find no evidence that recursion improves the primary metric.** Its advantage over the same-size network
-is explained by longer training, and it only ties untied depth. It may help on high-amplitude, shock-dominated
-cases, which is what the RMSE result suggests; that needs a targeted test. All Transformers are about 25×
-better than the best linear map, so the task is learnt and needs nonlinearity.
+**Overall, recursion does not improve the primary metric.** Its advantage over the same-size network is explained
+by longer training, and it only ties untied depth. **But it is the most accurate model on the hardest,
+shock-dominated quarter of the data, and its refinement steps help exactly there.** That points to
+*adaptive* recursion, i.e. TRM-style halting that refines only the hard cases, as the version worth testing next.
+All Transformers are about 25× better than the best linear map, so the task is learnt and needs nonlinearity.
 
 ---
 
@@ -238,6 +244,41 @@ same-form task, with more training data and a sharper-shock regime. We **did not
 exact protocol. That comparison is the obvious next step, and the gap to PDEBench's FNO suggests that spectral
 inductive biases remain strong on periodic 1D problems.
 
+### 3.5 Error by shock strength
+
+To test where recursion's RMSE advantage comes from, we split the 1,000 test trajectories into four
+equal-count quartiles using the **steepest gradient of the true solution**, max |∂u/∂x| at t = 1, as a
+measure of shock strength. The analysis is `analyze_by_amplitude.py`. Splitting by amplitude, max(u) − min(u),
+gives the same picture; full tables are in `results_by_amplitude/by_amplitude.md`.
+
+![Error by shock strength](figures/error_by_shock_strength.png)
+
+*Mean relative L² (left) and RMSE (right) per quartile of amplitude (top) and of max |∂u/∂x| (bottom).
+Error bars are the std over 2 seeds.*
+
+**Mean relative L² by shock-strength quartile** (mean ± std over 2 seeds):
+
+| Model | Q1 (smoothest): max ∣∂u/∂x∣ < 1.5 | Q2: 1.5–5.3 | Q3: 5.3–11.7 | Q4 (strongest shocks): 11.7–36 | Q4 / Q1 |
+|---|---:|---:|---:|---:|---:|
+| Shallow | 0.0144 ± 0.0011 | 0.0149 ± 0.0024 | 0.0167 ± 0.0027 | 0.0227 ± 0.0043 | 1.6× |
+| Shallow, 4× epochs | **0.0085 ± 0.0000** | **0.0090 ± 0.0009** | **0.0102 ± 0.0013** | 0.0170 ± 0.0045 | 2.0× |
+| Recursive | 0.0138 ± 0.0006 | 0.0128 ± 0.0005 | 0.0125 ± 0.0006 | **0.0149 ± 0.0008** | **1.08×** |
+| Deep | 0.0097 ± 0.0003 | 0.0120 ± 0.0011 | 0.0139 ± 0.0007 | 0.0167 ± 0.0004 | 1.7× |
+
+| In the strongest-shock quartile (Q4) | Shallow | Shallow 4× | Recursive | Deep |
+|---|---:|---:|---:|---:|
+| RMSE | 0.0198 ± 0.0037 | 0.0202 ± 0.0041 | **0.0113 ± 0.0008** | 0.0204 ± 0.0041 |
+| Share of the model's total squared error | 77% | 87% | 60% | 63% |
+
+**Recursive model, relative L² after each refinement step:**
+
+| Step | Q1 (smoothest) | Q2 | Q3 | Q4 (strongest) |
+|---|---:|---:|---:|---:|
+| 1 | **0.0117** | **0.0119** | 0.0128 | 0.0167 |
+| 2 | 0.0125 | **0.0119** | 0.0121 | 0.0153 |
+| 3 | 0.0123 | 0.0121 | **0.0120** | **0.0147** |
+| 4 (reported) | 0.0138 | 0.0128 | 0.0125 | 0.0149 |
+
 ---
 
 ## 4. What the results say
@@ -260,27 +301,43 @@ inductive biases remain strong on periodic 1D problems.
    parameter-efficiency argument, and it holds here. But it buys no accuracy over the deep model, and neither
    beats a small model trained longer.
 
-4. **RMSE is where recursion stands out, consistently.** Recursive RMSE is 0.0073 ± 0.0003, against 0.0108
-   (shallow 4×), 0.0113 (shallow) and 0.0129 (deep), and both recursive seeds beat every other seed. Mean
-   relative L² weights every trajectory equally, while RMSE pools absolute errors and is dominated by
-   **high-amplitude trajectories, which are the ones with the strongest shocks**. So recursion seems to help on
-   exactly the cases that make Burgers hard, while doing no better, or worse, on low-amplitude smooth ones. This is
-   a hypothesis the RMSE result suggests, not one we tested. Section 6 lists a direct test.
+4. **Recursion is the best model on the strongest shocks, and that is the source of its RMSE advantage.**
+   Overall RMSE (0.0073 vs 0.0108–0.0129) is dominated by the most-shocked trajectories: the top quartile holds
+   60–87% of every model's squared error. In that quartile (§3.5):
+   * Recursion has the lowest relative L², 0.0149 against 0.0167–0.0227. Both recursive seeds beat both deep
+     seeds; the two 4×-shallow seeds fall either side of it.
+   * Its RMSE there is 0.0113, against about 0.020 for every other model, 43% lower, with every seed better.
+   * Its error is almost independent of shock strength (×1.08 from Q1 to Q4), while every other model's error
+     grows ×1.6–2.0.
 
-5. **Refinement helps, then overshoots.** Error falls from step 1 to step 3 (0.0133 → 0.0128), then **rises at
-   step 4 to 0.0135**, worse than step 1. This happens in both seeds, on validation and test, and in the
-   overfitting sanity run. In the example trajectories, step 4's extra error sits on the smooth ramps, not at the
-   shocks (§3.2 figure). Step 3 alone (0.0128) would edge out the deep model at 75% of its FLOPs. But the protocol
-   fixed step 4 as the output before training, so step 3 is an exploratory observation, not a result.
+   The cost is on smooth trajectories: in Q1 it is worse than both the deep and the 4×-shallow models.
+   Recursion seems to **spend its capacity on the hard nonlinear part**, much as iterative solvers spend their
+   iterations where the solution is hard.
+
+5. **Refinement helps on shocks and hurts on smooth fields.** Averaged over all trajectories, error falls from
+   step 1 to step 3 (0.0133 → 0.0128) and rises at step 4 (0.0135). This happens in both seeds, on validation
+   and test, and in the overfitting run. Splitting by shock strength shows where it comes from:
+   * In the strongest-shock quartile, steps 1→3 cut the error by 12% (0.0167 → 0.0147), and step 4 holds steady.
+   * In the smoothest quartile, **step 1 is best** (0.0117), and step 4 is 18% worse (0.0138).
+
+   This matches the example trajectories, where step 4's extra error sits on the smooth ramps (§3.2 figure).
+   Picking the best step for each quartile would give about 0.0126 overall instead of 0.0135. But that
+   uses the true solution's shock strength and the test set, so it is an **illustration of what learned
+   halting could gain, not a result**. It would still trail the 4×-shallow model (0.0112). The protocol fixed
+   step 4 as the reported output before training.
 
 ### Verdict
 
 **On the primary metric, TRM-style recursion did not beat the controls.** Its gain over a same-size network
 disappears once that network gets the same number of optimizer updates, and it only ties untied depth of equal
 compute, though with 11× fewer parameters. If you have a fixed training budget of updates and want accuracy, a
-small non-recursive Transformer trained longer was the best option here, and 12× cheaper at inference. The
-remaining open question is **RMSE**: recursion's large, seed-consistent RMSE advantage suggests it handles
-high-amplitude, shock-dominated trajectories better, and that is worth testing directly.
+small non-recursive Transformer trained longer was the best option here, and 12× cheaper at inference.
+
+**The shock-strength analysis changes the picture.** Recursion is the most accurate model on the hardest
+quarter of the data, the trajectories with the strongest shocks, and its refinement steps help exactly there
+while hurting on smooth cases. A fixed number of refinement steps averages these two effects away. That makes
+**adaptive recursion** (TRM's learned halting: stop early on easy inputs, refine hard ones) the hypothesis worth
+testing next, not "recursion in general".
 
 ---
 
@@ -302,21 +359,25 @@ high-amplitude, shock-dominated trajectories better, and that is worth testing d
   Transformers against the state of the art. The table in §3.4 is context only.
 * **Time indexing.** PDEBench stores 202 time values for 201 snapshots. We assume snapshot k is at t[k], which
   gives t\* = 1.00. Under the other reading t\* = 1.01. The choice is logged in `data/burgers_nu0.01_t1_meta.json`.
+* **Shock-strength bins use the true solution.** The analysis in §3.5 bins trajectories by features of the
+  target, which a model does not have at inference time. It shows *where* each model is accurate. It does not
+  show that an inference-time difficulty estimate would work as well.
 * **Latency is overhead-bound.** These models are tiny (GPU utilization was about 25%), so latency tracks the
   number of sequential layer calls, not FLOPs. The relative costs would differ for larger models or with CUDA
   graphs.
 
 ## 6. Next steps
 
-1. **Test the RMSE hypothesis directly.** Bin test trajectories by amplitude or shock strength (e.g. max |∂ₓu|
-   at t = 1) and compare per-bin error across models.
+1. **Adaptive halting.** Let the recursive model choose its number of steps per input, using TRM's learned
+   halting head or a difficulty estimate computed from u(x,0) or from the step-1 prediction. §3.5 suggests
+   stopping at step 1 on smooth inputs and refining shocked ones. Compare against the 4×-shallow model at equal
+   training updates.
 2. Train all models to convergence (or for equal wall-clock time) and re-rank them, with 3+ seeds.
 3. Run FNO and U-Net under exactly this protocol.
 4. Test whether the step-4 overshoot is fixable: weight later steps' losses more heavily, use a lower learning
    rate for the recursive model, or select the best step on validation as part of the method.
-5. Make the computation adaptive: run more refinement steps on hard trajectories (those with shocks), as in TRM's
-   learned halting.
-6. Sweep viscosity (ν = 0.001 → 1.0) and target time to see whether recursion helps more when shocks are sharper.
+5. Sweep viscosity (ν = 0.001 → 1.0) and target time. §3.5 predicts that recursion's relative advantage grows
+   as shocks get sharper (smaller ν).
 
 ---
 
