@@ -6,6 +6,7 @@ channels:
   - conda-forge
 dependencies:
   - python=3.12
+  - aria2          # parallel download of the 8 GB HDF5 (pde_burgers/download.py)
   - pip
   - pip:
       - --extra-index-url https://download.pytorch.org/whl/cu126

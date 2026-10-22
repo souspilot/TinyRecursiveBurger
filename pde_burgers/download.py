@@ -9,6 +9,7 @@ import csv
 import hashlib
 import io
 import os
+import shutil
 import urllib.request
 
 FILENAME = "1D_Burgers_Sols_Nu0.01.hdf5"
@@ -42,6 +43,8 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--root_folder", default="data/pdebench")
     p.add_argument("--skip_md5", action="store_true")
+    p.add_argument("--connections", type=int, default=16,
+                   help="parallel range connections when aria2c is available (1 = plain wget)")
     args = p.parse_args()
 
     row = lookup_row()
@@ -52,8 +55,15 @@ def main():
 
     if not os.path.exists(out):
         tmp = out + ".part"
-        # wget -c resumes partial downloads of this ~8 GB file
-        rc = os.system(f"wget -c -O '{tmp}' '{row['URL']}'")
+        # Both resume partial downloads of this ~8 GB file. aria2c splits it into parallel
+        # byte-range connections, which helps when each single connection is throttled
+        # (e.g. behind a proxy); both honour http_proxy/https_proxy.
+        if shutil.which("aria2c") and args.connections > 1:
+            n = min(args.connections, 16)
+            rc = os.system(f"aria2c -c -x {n} -s {n} -k 20M --file-allocation=none "
+                           f"--summary-interval=30 -d '{out_dir}' -o '{os.path.basename(tmp)}' '{row['URL']}'")
+        else:
+            rc = os.system(f"wget -c -O '{tmp}' '{row['URL']}'")
         if rc != 0:
             raise SystemExit("download failed (re-run to resume)")
         os.replace(tmp, out)
