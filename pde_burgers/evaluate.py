@@ -24,10 +24,13 @@ import torch
 from pde_burgers.common import BurgersData, autocast, metrics, per_traj_rel_l2, predict
 from pde_burgers.models import build_model, core_layer_calls, count_params
 
-COLORS = {"shallow": "#2a78d6", "recursive": "#eb6834", "deep": "#1baf7a", "persistence": "#8a8984"}
+COLORS = {"shallow": "#2a78d6", "recursive": "#eb6834", "deep": "#1baf7a", "persistence": "#8a8984",
+          "ridge": "#52514e"}
 LABELS = {"shallow": "2-layer (no recursion)", "recursive": "recursive TRM (2-layer core)",
-          "deep": "24-layer untied", "persistence": "persistence u(x,0)"}
-ORDER = ["persistence", "shallow", "recursive", "deep"]
+          "deep": "24-layer untied", "persistence": "persistence u(x,0)",
+          "mean": "training-mean field", "ridge": "ridge regression (linear)"}
+ORDER = ["mean", "persistence", "ridge", "shallow", "recursive", "deep"]
+RIDGE_ALPHAS = [1e-2, 1e-1, 1, 10, 100, 1e3, 1e4]
 
 
 def sync(device):
@@ -64,6 +67,36 @@ def load_run(run_dir, device):
     return ck, model, summary
 
 
+def reference_baselines(data):
+    """Untrained/closed-form reference points, fit on train only (ridge alpha chosen on val).
+
+    mean : the training-set average u(x,t*), ignoring the input -> tests whether u(x,0) is used at all.
+    ridge: best linear map u(x,0) -> u(x,t*) (with bias) -> tests whether nonlinearity is needed.
+    """
+    dev = data.split["train"][0].device
+    (u0_tr, ut_tr), (u0_va, ut_va), (u0_te, _) = (data.split[s] for s in ("train", "val", "test"))
+    mean_field = ut_tr.double().mean(0)
+    out = {"mean": {"fit": {"val": metrics(mean_field.expand_as(ut_va), ut_va)},
+                    "pred": lambda u: mean_field.expand(len(u), -1).float(), "params": mean_field.numel()}}
+
+    X = torch.cat([data.norm(u0_tr).double(), torch.ones(len(u0_tr), 1, dtype=torch.float64, device=dev)], 1)
+    Y = data.norm(ut_tr).double()
+    XtX, XtY = X.T @ X, X.T @ Y
+    eye = torch.eye(X.shape[1], dtype=torch.float64, device=dev)
+    lin = lambda W, u: data.denorm(torch.cat([data.norm(u).double(), torch.ones(len(u), 1, dtype=torch.float64,
+                                                                                  device=dev)], 1) @ W).float()
+    best = None
+    for a in RIDGE_ALPHAS:
+        W = torch.linalg.solve(XtX + a * eye, XtY)
+        val = metrics(lin(W, u0_va), ut_va)
+        print(f"[eval] ridge alpha={a:g}: val relL2 {val['rel_l2_mean']:.5f}")
+        if best is None or val["rel_l2_mean"] < best[1]["rel_l2_mean"]:
+            best = (a, val, W)
+    a, val, W = best
+    out["ridge"] = {"fit": {"val": val, "alpha": a}, "pred": lambda u: lin(W, u), "params": W.numel()}
+    return out
+
+
 def mean_std(vals):
     vals = [v for v in vals if v is not None]
     if not vals:
@@ -98,6 +131,12 @@ def main():
              "latency_ms": {}, "core_layer_calls": 0}]
     pertraj = {"persistence": per_traj_rel_l2(u0, ut)}
     preds_for_plot = {"persistence": u0}
+    for name, ref in reference_baselines(data).items():
+        pred = ref["pred"](u0)
+        rows.append({"model": name, "run": "-", "seed": None, "params": ref["params"], **ref["fit"],
+                     "test": metrics(pred, ut), "latency_ms": {}, "core_layer_calls": 0})
+        pertraj[name], preds_for_plot[name] = per_traj_rel_l2(pred, ut), pred
+        print(f"[eval] {name}: test relL2 {rows[-1]['test']['rel_l2_mean']:.5f}")
 
     for rd in run_dirs:
         ck, model, summary = load_run(rd, device)
@@ -193,19 +232,21 @@ def plot_fields(data, u0, ut, preds, pertraj, out_dir):
     err = pertraj[ref]
     picks = [int(np.argsort(err)[int(q * (len(err) - 1))]) for q in (0.1, 0.5, 0.9)]
     x = data.x
-    models = [m for m in ("shallow", "recursive", "deep") if m in preds]
+    models = [m for m in ("ridge", "shallow", "recursive", "deep") if m in preds]
     fig, axes = plt.subplots(2, 3, figsize=(15, 7), sharex=True)
     for j, (i, q) in enumerate(zip(picks, ("p10", "median", "p90"))):
         ax = axes[0, j]
         ax.plot(x, u0[i].cpu(), color=COLORS["persistence"], lw=1.2, ls="--", label="u(x,0)")
         ax.plot(x, ut[i].cpu(), color="#0b0b0b", lw=2, label="true u(x,t*)")
         for m in models:
-            ax.plot(x, preds[m][i].cpu(), color=COLORS[m], lw=1.4, label=LABELS[m])
+            ax.plot(x, preds[m][i].cpu(), color=COLORS[m], lw=1.4, label=LABELS[m],
+                    ls=":" if m == "ridge" else "-")
         ax.set_title(f"test #{data.idx['test'][i].item()} ({q} of {ref} error)")
         _style(ax)
         ax2 = axes[1, j]
         for m in models:
-            ax2.plot(x, (preds[m][i] - ut[i]).abs().cpu(), color=COLORS[m], lw=1.2, label=LABELS[m])
+            ax2.plot(x, (preds[m][i] - ut[i]).abs().cpu(), color=COLORS[m], lw=1.2, label=LABELS[m],
+                     ls=":" if m == "ridge" else "-")
         ax2.set_yscale("log")
         ax2.set_xlabel("x")
         _style(ax2)
@@ -251,12 +292,13 @@ def plot_refinement(rows, args):
         for k in ks:
             a2.annotate(f"K={k}", (lat.mean(0)[k - 1], e.mean(0)[k - 1]), textcoords="offset points",
                         xytext=(6, 6), fontsize=8, color="#52514e")
-    for name in ("persistence", "shallow", "deep"):
+    for name in ("persistence", "ridge", "shallow", "deep"):
         if name not in by:
             continue
         m = np.mean([r["test"]["rel_l2_mean"] for r in by[name]])
-        a1.axhline(m, color=COLORS[name], lw=1.5, ls="--" if name == "persistence" else "-", label=LABELS[name])
-        if name != "persistence":
+        a1.axhline(m, color=COLORS[name], lw=1.5, label=LABELS[name],
+                   ls={"persistence": "--", "ridge": ":"}.get(name, "-"))
+        if name not in ("persistence", "ridge"):
             a2.scatter([np.mean([final_latency(r, bs) for r in by[name]])], [m], s=70,
                        color=COLORS[name], edgecolor="white", linewidth=2, zorder=3, label=LABELS[name])
     a1.set_xlabel("refinement step")
