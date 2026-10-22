@@ -16,13 +16,17 @@ controls for **the same size**, **the same compute** and **the same number of tr
 | Recursive, 4 refinement steps | 416K | 1,410 | 0.0135 | **0.0073** |
 | Recursive, adaptive halting (no retraining) | 416K | 815 | 0.0126 | **0.0073** |
 
-**Findings.**
+**Findings.** The average hides a regime split. With the same number of training updates, a plain 2-layer network
+is the most accurate model overall. But:
 
-* On average, recursion does not beat a small network trained for the same number of updates.
-* Recursion is the most accurate model on the strongest shocks. Its error barely grows with shock strength, while
-  every other model's error doubles.
-* Choosing how many refinement steps to take for each input matches the 24-layer model with 11× fewer parameters
-  and 58% of its compute.
+* The recursive model's error is **nearly independent of shock strength** (×1.08 from the smoothest to the
+  most-shocked quarter, against ×1.6–2.0 for every other model). That makes it the most accurate model on the
+  strongest shocks and one of the least accurate on smooth waves.
+* **Refinement helps on shocks** (−12% from step 1 to step 3) **and hurts on smooth inputs** (+18% by step 4).
+* **The model's first guess tells it how long to think.** Choosing the number of steps from the sharpness of the
+  step-1 prediction (no retraining) matches the 24-layer model with 11× fewer parameters and 58% of its compute.
+  A hindsight oracle over the 4 intermediate predictions reaches the best model's accuracy, so the bottleneck is
+  deciding when to stop.
 
 **Read more**
 
