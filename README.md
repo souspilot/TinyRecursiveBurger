@@ -1,3 +1,9 @@
+> **This repository adds [`pde_burgers/`](pde_burgers/README.md)**: an exploratory study of TRM-style recursive refinement on PDEBench 1D Burgers.
+> Everything else is the original Tiny Recursive Models code by Alexia Jolicoeur-Martineau / Samsung SAIL Montréal
+> ([upstream](https://github.com/SamsungSAILMontreal/TinyRecursiveModels), MIT License, see `LICENSE`), reproduced unchanged below.
+
+---
+
 **Update: Due to many automatically generated and irrelevant issues submitted to this repo (that have been deleted now) and our limited capacity to properly maintain this repo, we have to temporaliy archive (make read-only) this and several other repos.**
 
 

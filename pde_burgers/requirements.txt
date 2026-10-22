@@ -1,0 +1,5 @@
+# torch is assumed preinstalled for the server's CUDA version (see the top-level README)
+numpy
+h5py
+matplotlib
+pyyaml

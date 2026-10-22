@@ -1,0 +1,30 @@
+# Default configuration for the PDEBench 1D Burgers (nu=0.01) recursion study.
+# Every key can be overridden on the command line, e.g. `--epochs 400 --seed 1`.
+
+# ---- data ----
+data_cache: data/burgers_nu0.01_t1.npz   # written by pde_burgers.prepare_data
+overfit_n: 0          # >0: train AND validate on the first N training trajectories (sanity check)
+
+# ---- architecture (shared by all models) ----
+num_patches: 128      # 1024 points / 8
+patch_size: 8
+d_model: 128
+n_heads: 4
+ffn_mult: 4
+core_layers: 2        # layers in f_theta (recursive) and in the shallow baseline
+deep_layers: 24       # untied deep control: 4 steps x 3 calls x 2 layers
+n_latent: 2           # n: z-updates per refinement step
+n_sup: 4              # K: supervised refinement steps
+
+# ---- optimisation ----
+batch_size: 64
+lr: 3.0e-4
+weight_decay: 0.01
+grad_clip: 1.0
+warmup_steps: 200     # linear warmup, then cosine decay to 0 over the planned optimizer steps
+ema_decay: 0.999
+epochs: 1000          # set from the throughput benchmark so the run fits its time budget
+max_minutes: 210      # hard safety cap on wall-clock training time
+eval_every: 5         # epochs between EMA validations
+bf16: true
+seed: 0               # model init / shuffling seed (the data split is always seed 42)
