@@ -150,8 +150,9 @@ BF16 forward passes on an otherwise idle A100-SXM4-80GB.
 
 ![Error vs refinement step and vs latency](figures/error_vs_refinement_and_latency.png)
 
-*Left: test relative L² after each refinement step of the recursive model. The horizontal lines are the
-baselines. Right: the same errors plotted against measured inference latency at batch 1000.*
+*Left: test relative L² after each refinement step of the recursive model. The horizontal lines are the shallow
+and deep controls. Persistence and ridge regression are left out because they are 20–100× worse; they are in
+the table. Right: the same errors plotted against measured inference latency at batch 1000.*
 
 ### 3.2 Recursive model after each refinement step (same checkpoint)
 
@@ -165,7 +166,8 @@ baselines. Right: the same errors plotted against measured inference latency at 
 ![Recursive model: spatial error by refinement step](figures/recursive_spatial_error_by_step.png)
 
 *|û − u| along x after each refinement step, for test trajectories at the 10th, 50th and 90th percentile of the
-recursive model's error.*
+recursive model's error. The error at the shocks (x ≈ 0.95 in the middle panel; x ≈ 0.48 and 0.9 on the right)
+hardly changes across steps. In these examples, step 4's extra error appears over the smooth ramps instead.*
 
 ### 3.3 Example predictions
 
@@ -174,7 +176,17 @@ recursive model's error.*
 *Top: u(x,0) (dashed), the true u(x,1) (black), and each model's prediction. Bottom: |error| on a log scale.
 The three columns are the 10th, 50th and 90th percentile test trajectories by recursive-model error.*
 
-<!-- TODO after viewing the figure: note where the errors concentrate (e.g. at the shock fronts). -->
+What the examples show:
+
+* **By t = 1 the solutions have formed shocks.** The median and 90th-percentile cases show the characteristic
+  Burgers sawtooth: linear ramps ending in steep fronts. The 10th-percentile case is a low-amplitude wave that
+  diffusion has kept smooth, with no shock.
+* **The errors are at the shocks.** All three Transformers follow the ramps to about 10⁻³ and peak at
+  10⁻²–10⁻¹ on the fronts, where a small error in the shock's position becomes a large pointwise error. The
+  shallow model has the largest peaks at the shocks. The deep and recursive models are closer to each other.
+* **Ridge regression predicts an almost flat line near the mean of u(x,0).** With periodic boundaries, Burgers
+  conserves ∫u dx, so the spatial mean is the one thing a linear map can predict reliably. It cannot place a shock,
+  which is why the best linear model's error stops at 0.34.
 
 ### 3.4 Context: results from other work
 
@@ -203,8 +215,9 @@ inductive biases remain strong on periodic 1D problems.
 
 1. **The task is learnt and needs nonlinearity.** The training-mean field scores 1.00, persistence 1.77 (the
    solution changes a lot by t = 1) and ridge regression 0.34. All three Transformers reach 0.013–0.015, which
-   is **about 25× better than the best linear map**. The models are learning the nonlinear steepening, not just
-   a linear filter.
+   is **about 25× better than the best linear map**. The best linear map essentially predicts only the conserved
+   mean (§3.3). The models are learning the nonlinear steepening and the shock positions, not just a linear
+   filter.
 
 2. **Recursion beats the same-size network, at a large cost.** Relative L² improves by 9% (0.0153 → 0.0140)
    and RMSE by 24%. The price is 7.6× the latency at batch 1, 8.3× the training time, and 4× the optimizer
@@ -223,7 +236,8 @@ inductive biases remain strong on periodic 1D problems.
 5. **Refinement helps, then overshoots.** Error falls from step 1 to step 3 (0.0136 → 0.0132), then **rises
    at step 4 to 0.0140**, which is worse than step 1. The same pattern appears on validation and test, and in
    the overfitting sanity run. Step 3 (18 layer applications) comes within about 5% of the deep model at 64% of
-   its latency. Because the protocol fixed step 4 as the reported output before training, we report step 4
+   its latency. In the example trajectories, step 4's extra error sits on the smooth ramps, not at the shocks
+   (§3.2 figure). The last step appears to add small-scale noise rather than misplace fronts. Because the protocol fixed step 4 as the reported output before training, we report step 4
    and treat step 3 as an exploratory observation, not a tuned result.
 
 6. **Most of the gain arrives within the first step.** Step 1 already beats the shallow model (0.0136 vs

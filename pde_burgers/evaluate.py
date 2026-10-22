@@ -252,8 +252,9 @@ def plot_fields(data, u0, ut, preds, pertraj, out_dir):
         _style(ax2)
     axes[0, 0].set_ylabel("u")
     axes[1, 0].set_ylabel("|prediction − truth|")
-    axes[0, 0].legend(fontsize=8, frameon=False)
-    fig.tight_layout()
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=len(labels), fontsize=9, frameon=False)
+    fig.tight_layout(rect=(0, 0.05, 1, 1))
     fig.savefig(os.path.join(out_dir, "fields.png"), dpi=150)
     plt.close(fig)
 
@@ -290,24 +291,21 @@ def plot_refinement(rows, args):
             ax.errorbar(arr_x, e.mean(0), yerr=e.std(0, ddof=1) if len(rs) > 1 else None,
                         color=COLORS["recursive"], marker="o", ms=8, lw=2, capsize=3, label=LABELS["recursive"])
         for k in ks:
-            a2.annotate(f"K={k}", (lat.mean(0)[k - 1], e.mean(0)[k - 1]), textcoords="offset points",
+            a2.annotate(f"step {k}", (lat.mean(0)[k - 1], e.mean(0)[k - 1]), textcoords="offset points",
                         xytext=(6, 6), fontsize=8, color="#52514e")
-    for name in ("persistence", "ridge", "shallow", "deep"):
+    # persistence/ridge are orders of magnitude worse and would flatten these axes; they live in results.md
+    for name in ("shallow", "deep"):
         if name not in by:
             continue
         m = np.mean([r["test"]["rel_l2_mean"] for r in by[name]])
-        a1.axhline(m, color=COLORS[name], lw=1.5, label=LABELS[name],
-                   ls={"persistence": "--", "ridge": ":"}.get(name, "-"))
-        if name not in ("persistence", "ridge"):
-            a2.scatter([np.mean([final_latency(r, bs) for r in by[name]])], [m], s=70,
-                       color=COLORS[name], edgecolor="white", linewidth=2, zorder=3, label=LABELS[name])
+        a1.axhline(m, color=COLORS[name], lw=1.5, label=LABELS[name])
+        a2.scatter([np.mean([final_latency(r, bs) for r in by[name]])], [m], s=70,
+                   color=COLORS[name], edgecolor="white", linewidth=2, zorder=3, label=LABELS[name])
     a1.set_xlabel("refinement step")
     a1.set_ylabel("test mean relative L2")
-    a1.set_yscale("log")
     a1.set_xticks(range(1, 5))
     a2.set_xlabel(f"inference latency, batch {bs} (ms)")
     a2.set_ylabel("test mean relative L2")
-    a2.set_yscale("log")
     for ax in (a1, a2):
         _style(ax)
         ax.legend(fontsize=8, frameon=False)
